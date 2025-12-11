@@ -1,0 +1,66 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Merchant {
+  id          String   @id @default(cuid())
+  name        String
+  shopName    String
+  phone       String   @unique
+  category    String
+  address     String
+  walletBalance Float  @default(0)
+  pointsRate  Float    @default(1) // Points per 100 rupees spent
+  isActive    Boolean  @default(true)
+  qrCode      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions Transaction[]
+  redemptions  Redemption[]
+}
+
+model Customer {
+  id          String   @id @default(cuid())
+  name        String
+  phone       String   @unique
+  totalPoints Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  transactions Transaction[]
+  redemptions  Redemption[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  merchantId  String
+  customerId  String
+  amount      Float
+  pointsEarned Float
+  type        String   // "EARN" or "REDEEM"
+  createdAt   DateTime @default(now())
+
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+  customer    Customer @relation(fields: [customerId], references: [id])
+}
+
+model Redemption {
+  id          String   @id @default(cuid())
+  merchantId  String
+  customerId  String
+  pointsUsed  Float
+  discount    Float
+  createdAt   DateTime @default(now())
+
+  merchant    Merchant @relation(fields: [merchantId], references: [id])
+  customer    Customer @relation(fields: [customerId], references: [id])
+}
