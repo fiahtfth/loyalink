@@ -6,26 +6,56 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Mall {
+  id              String   @id @default(cuid())
+  name            String
+  location        String
+  bonusWallet     Float    @default(0)
+  bonusEnabled    Boolean  @default(false)
+  bonusRate       Float    @default(0.10) // 10% bonus on mall redemptions
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  merchants       Merchant[]
+  ledgerEntries   Ledger[]
+
+  @@index([isActive])
+  @@index([createdAt])
 }
 
 model Merchant {
-  id          String   @id @default(cuid())
-  name        String
-  shopName    String
-  phone       String   @unique
-  category    String
-  address     String
-  walletBalance Float  @default(0)
-  pointsRate  Float    @default(1) // Points per 100 rupees spent
-  isActive    Boolean  @default(true)
-  qrCode      String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  name            String
+  shopName        String
+  phone           String   @unique
+  category        String
+  address         String
+  mallId          String?
+  walletBalance   Float    @default(0)
+  settlementRate  Float    @default(0.85) // 85% settlement rate (merchant gets 85% of redeemed points)
+  settlementCycle SettlementCycle @default(T_PLUS_7)
+  isActive        Boolean  @default(true)
+  qrCode          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  transactions Transaction[]
-  redemptions  Redemption[]
+  mall            Mall?    @relation(fields: [mallId], references: [id])
+  transactions    Transaction[]
+  redemptions     Redemption[]
+  customerTiers   CustomerTier[]
+  ledgerEntries   Ledger[]
+  settlements     Settlement[]
+
+  @@index([category])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([mallId])
 }
 
 model Customer {
@@ -36,31 +66,300 @@ model Customer {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  transactions Transaction[]
-  redemptions  Redemption[]
+  transactions  Transaction[]
+  redemptions   Redemption[]
+  tiers         CustomerTier[]
+  ledgerEntries Ledger[]
+
+  @@index([createdAt])
+  @@index([totalPoints])
+}
+
+model CustomerTier {
+  id              String   @id @default(cuid())
+  customerId      String
+  merchantId      String
+  tier            String   @default("BRONZE") // BRONZE, SILVER, GOLD, PLATINUM
+  totalSpent      Float    @default(0)
+  totalVisits     Int      @default(0)
+  tierBonusRate   Float    @default(0.10) // 10% bonus for home-store redemption
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer @relation(fields: [customerId], references: [id])
+  merchant        Merchant @relation(fields: [merchantId], references: [id])
+
+  @@unique([customerId, merchantId])
+  @@index([customerId])
+  @@index([merchantId])
+  @@index([tier])
 }
 
 model Transaction {
-  id          String   @id @default(cuid())
-  merchantId  String
-  customerId  String
-  amount      Float
-  pointsEarned Float
-  type        String   // "EARN" or "REDEEM"
-  createdAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  merchantId      String
+  customerId      String
+  amount          Float
+  pointsEarned    Float
+  type            String   // "EARN" or "REDEEM"
+  earnMerchantId  String?  // Track where points were originally earned (for cross-store tracking)
+  createdAt       DateTime @default(now())
 
-  merchant    Merchant @relation(fields: [merchantId], references: [id])
-  customer    Customer @relation(fields: [customerId], references: [id])
+  merchant        Merchant @relation(fields: [merchantId], references: [id])
+  customer        Customer @relation(fields: [customerId], references: [id])
+
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([earnMerchantId])
 }
 
 model Redemption {
-  id          String   @id @default(cuid())
-  merchantId  String
-  customerId  String
-  pointsUsed  Float
-  discount    Float
-  createdAt   DateTime @default(now())
+  id                  String   @id @default(cuid())
+  merchantId          String
+  customerId          String
+  pointsUsed          Float
+  discount            Float
+  settlementAmount    Float    // Amount credited to merchant wallet (pointsUsed × settlementRate)
+  isHomeStore         Boolean  @default(false)
+  homeStoreBonusPoints Float   @default(0)
+  tierBonusPoints     Float    @default(0)
+  mallBonusPoints     Float    @default(0)
+  otpVerified         Boolean  @default(false)
+  createdAt           DateTime @default(now())
 
-  merchant    Merchant @relation(fields: [merchantId], references: [id])
-  customer    Customer @relation(fields: [customerId], references: [id])
+  merchant            Merchant @relation(fields: [merchantId], references: [id])
+  customer            Customer @relation(fields: [customerId], references: [id])
+
+  @@index([merchantId])
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([isHomeStore])
+}
+
+// Double-Entry Accounting System (as per Strategic Framework Section 3)
+model Account {
+  id          String      @id @default(cuid())
+  holderId    String      // UUID of User, Merchant, Mall, or Platform
+  holderType  AccountHolderType
+  accountType AccountType
+  currency    Currency    @default(INR)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  postings    Posting[]
+
+  @@index([holderId])
+  @@index([holderType])
+  @@index([accountType])
+  @@unique([holderId, accountType, currency])
+}
+
+enum AccountHolderType {
+  USER
+  MERCHANT
+  MALL
+  PLATFORM
+}
+
+enum AccountType {
+  USER_WALLET              // Customer's point balance
+  MERCHANT_PREPAID         // Merchant's pre-funded wallet
+  MERCHANT_PAYABLE         // Platform owes merchant (redemptions)
+  MERCHANT_RECEIVABLE      // Merchant owes platform (issuance fees)
+  PLATFORM_REVENUE         // Platform's revenue account
+  PLATFORM_LIABILITY       // Platform's liability to users (issued points)
+  PLATFORM_ESCROW          // Escrow for unredeemed points
+  MALL_WALLET              // Mall's bonus wallet
+}
+
+enum Currency {
+  INR   // Indian Rupees
+  PTS   // Loyalty Points
+}
+
+model JournalEntry {
+  id            String    @id @default(cuid())
+  timestamp     DateTime  @default(now())
+  description   String
+  referenceId   String?   // External reference (e.g., POS Bill ID, Transaction ID)
+  referenceType String?   // Type of reference (TRANSACTION, REDEMPTION, SETTLEMENT)
+  metadata      Json?     // Additional context
+  createdAt     DateTime  @default(now())
+
+  postings      Posting[]
+
+  @@index([timestamp])
+  @@index([referenceId])
+  @@index([referenceType])
+}
+
+model Posting {
+  id            String        @id @default(cuid())
+  journalId     String
+  accountId     String
+  amount        BigInt        // Signed integer in smallest unit (paise for INR, 1 for points)
+  currency      Currency
+  createdAt     DateTime      @default(now())
+
+  journal       JournalEntry  @relation(fields: [journalId], references: [id])
+  account       Account       @relation(fields: [accountId], references: [id])
+
+  @@index([journalId])
+  @@index([accountId])
+  @@index([createdAt])
+}
+
+// Settlement Management (as per Strategic Framework Section 2.3)
+model Settlement {
+  id              String          @id @default(cuid())
+  merchantId      String
+  settlementCycle SettlementCycle
+  periodStart     DateTime
+  periodEnd       DateTime
+  totalRedemptions Float          // Total points redeemed
+  settlementAmount Float          // Actual cash to be paid
+  status          SettlementStatus @default(PENDING)
+  upiTransactionId String?
+  processedAt     DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  merchant        Merchant        @relation(fields: [merchantId], references: [id])
+
+  @@index([merchantId])
+  @@index([status])
+  @@index([periodEnd])
+  @@index([createdAt])
+}
+
+enum SettlementCycle {
+  T_PLUS_1   // Daily settlement (street vendors)
+  T_PLUS_3   // 3-day settlement
+  T_PLUS_7   // Weekly settlement (fashion/retail)
+  NET_30     // Monthly settlement (corporate anchors)
+  NET_45     // 45-day settlement (large corporates)
+}
+
+enum SettlementStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  DISPUTED
+}
+
+// Fraud Prevention & Velocity Limits (as per Strategic Framework Section 7.1)
+model VelocityLimit {
+  id              String   @id @default(cuid())
+  customerId      String
+  merchantId      String
+  transactionDate DateTime
+  earnCount       Int      @default(0)
+  lastEarnAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([customerId, merchantId, transactionDate])
+  @@index([customerId])
+  @@index([merchantId])
+  @@index([transactionDate])
+}
+
+// Points Escrow for Return Window (as per Strategic Framework Section 7.1)
+model EscrowedPoints {
+  id              String   @id @default(cuid())
+  transactionId   String   @unique
+  customerId      String
+  merchantId      String
+  points          Float
+  releaseDate     DateTime // When points become available
+  status          EscrowStatus @default(PENDING)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerId])
+  @@index([merchantId])
+  @@index([releaseDate])
+  @@index([status])
+}
+
+enum EscrowStatus {
+  PENDING
+  RELEASED
+  CLAWED_BACK
+}
+
+// WhatsApp Integration Tracking
+model WhatsAppSession {
+  id              String   @id @default(cuid())
+  customerId      String?
+  merchantId      String?
+  phone           String
+  sessionId       String   @unique
+  lastMessageAt   DateTime
+  context         Json?    // Current conversation context
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([phone])
+  @@index([customerId])
+  @@index([merchantId])
+  @@index([lastMessageAt])
+}
+
+// OTP Verification for High-Value Redemptions
+model OTPVerification {
+  id              String   @id @default(cuid())
+  phone           String
+  otp             String
+  purpose         String   // REDEMPTION, REGISTRATION, etc.
+  referenceId     String?  // Transaction or Redemption ID
+  verified        Boolean  @default(false)
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([phone])
+  @@index([referenceId])
+  @@index([expiresAt])
+}
+
+// Legacy Ledger (kept for backward compatibility, but double-entry is preferred)
+model Ledger {
+  id              String   @id @default(cuid())
+  customerId      String
+  merchantId      String
+  mallId          String?
+  entryType       String   // "EARN", "REDEEM", "HOME_STORE_BONUS", "TIER_BONUS", "MALL_BONUS"
+  points          Float
+  cashEquivalent  Float
+  description     String
+  metadata        Json?    // Additional context (tier, rates, etc.)
+  createdAt       DateTime @default(now())
+
+  customer        Customer @relation(fields: [customerId], references: [id])
+  merchant        Merchant @relation(fields: [merchantId], references: [id])
+  mall            Mall?    @relation(fields: [mallId], references: [id])
+
+  @@index([customerId])
+  @@index([merchantId])
+  @@index([mallId])
+  @@index([entryType])
+  @@index([createdAt])
+}
+
+model CategoryEarnRate {
+  id          String   @id @default(cuid())
+  category    String   @unique
+  earnRate    Float    @default(1.0) // Points per 100 rupees
+  marginProfile String @default("MEDIUM") // HIGH, MEDIUM, LOW
+  issuanceFee Float    @default(0.02) // 2% default issuance fee
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([isActive])
+  @@index([marginProfile])
 }

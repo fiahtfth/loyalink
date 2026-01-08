@@ -1,24 +1,29 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { earnTransactionSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
+import { updateCustomerTier } from "@/lib/tier-utils"
+import { createLedgerEntry } from "@/lib/ledger-utils"
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { merchantId, customerPhone, customerName, amount } = body
+    const validatedData = validateRequestBody(earnTransactionSchema, body)
+    const { merchantId, customerPhone, customerName, amount } = validatedData
 
     const merchant = await prisma.merchant.findUnique({
       where: { id: merchantId },
+      include: { mall: true },
     })
 
     if (!merchant) {
-      return NextResponse.json({ error: "Merchant not found" }, { status: 404 })
+      throw new AppError("Merchant not found", 404, "MERCHANT_NOT_FOUND")
     }
 
     if (!merchant.isActive) {
-      return NextResponse.json({ error: "Merchant is not active" }, { status: 400 })
+      throw new AppError("Merchant is not active", 400, "MERCHANT_INACTIVE")
     }
 
-    // Find or create customer
     let customer = await prisma.customer.findUnique({
       where: { phone: customerPhone },
     })
@@ -33,47 +38,74 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Calculate points (1 point per 100 rupees by default, adjusted by merchant rate)
-    const pointsEarned = Math.floor((amount / 100) * merchant.pointsRate)
+    const categoryEarnRate = await prisma.categoryEarnRate.findUnique({
+      where: { category: merchant.category },
+    })
 
-    // Deduct from merchant wallet
+    const earnRate = categoryEarnRate?.earnRate || 1.0
+    const pointsEarned = Math.floor((amount / 100) * earnRate)
+
     if (merchant.walletBalance < pointsEarned) {
-      return NextResponse.json({ 
-        error: "Merchant has insufficient wallet balance for rewards" 
-      }, { status: 400 })
+      throw new AppError(
+        "Merchant has insufficient wallet balance for rewards",
+        400,
+        "INSUFFICIENT_WALLET_BALANCE"
+      )
     }
 
-    // Create transaction and update balances
-    const [transaction] = await prisma.$transaction([
-      prisma.transaction.create({
+    const result = await prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.create({
         data: {
           merchantId,
           customerId: customer.id,
           amount,
           pointsEarned,
           type: "EARN",
+          earnMerchantId: merchantId,
         },
-        include: { merchant: true, customer: true }
-      }),
-      prisma.customer.update({
+      })
+
+      await tx.customer.update({
         where: { id: customer.id },
         data: { totalPoints: { increment: pointsEarned } },
-      }),
-      prisma.merchant.update({
+      })
+
+      await tx.merchant.update({
         where: { id: merchantId },
         data: { walletBalance: { decrement: pointsEarned } },
-      }),
-    ])
+      })
+
+      await tx.ledger.create({
+        data: {
+          customerId: customer.id,
+          merchantId,
+          mallId: merchant.mallId,
+          entryType: "EARN",
+          points: pointsEarned,
+          cashEquivalent: amount,
+          description: `Earned ${pointsEarned} points on purchase of ₹${amount} at ${merchant.shopName}`,
+          metadata: {
+            earnRate,
+            category: merchant.category,
+            transactionId: transaction.id,
+          },
+        },
+      })
+
+      return transaction
+    })
+
+    await updateCustomerTier(customer.id, merchantId, amount)
 
     return NextResponse.json({
       success: true,
-      transaction,
+      transaction: result,
       pointsEarned,
       newTotalPoints: customer.totalPoints + pointsEarned,
-      message: `Earned ${pointsEarned} points at ${merchant.shopName}!`
+      message: `Earned ${pointsEarned} points at ${merchant.shopName}!`,
+      earnRate,
     }, { status: 201 })
   } catch (error) {
-    console.error("Error processing earn transaction:", error)
-    return NextResponse.json({ error: "Failed to process transaction" }, { status: 500 })
+    return handleApiError(error)
   }
 }

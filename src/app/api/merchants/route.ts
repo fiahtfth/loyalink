@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { merchantSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody } from "@/lib/errors"
 
 export async function GET() {
   try {
@@ -9,35 +11,35 @@ export async function GET() {
         _count: {
           select: { transactions: true, redemptions: true }
         }
-      }
+      },
+      take: 100,
     })
     return NextResponse.json(merchants)
   } catch (error) {
-    console.error("Error fetching merchants:", error)
-    return NextResponse.json({ error: "Failed to fetch merchants" }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, shopName, phone, category, address, pointsRate } = body
+    const validatedData = validateRequestBody(merchantSchema, body)
 
     const merchant = await prisma.merchant.create({
       data: {
-        name,
-        shopName,
-        phone,
-        category,
-        address,
-        pointsRate: pointsRate || 1,
+        name: validatedData.name,
+        shopName: validatedData.shopName,
+        phone: validatedData.phone,
+        category: validatedData.category,
+        address: validatedData.address,
+        mallId: validatedData.mallId,
+        settlementRate: validatedData.settlementRate,
         walletBalance: 0,
       },
     })
 
     return NextResponse.json(merchant, { status: 201 })
   } catch (error) {
-    console.error("Error creating merchant:", error)
-    return NextResponse.json({ error: "Failed to create merchant" }, { status: 500 })
+    return handleApiError(error)
   }
 }

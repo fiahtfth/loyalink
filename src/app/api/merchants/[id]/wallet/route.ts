@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { walletUpdateSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
 
 export async function POST(
   request: NextRequest,
@@ -8,14 +10,15 @@ export async function POST(
   try {
     const { id } = await params
     const body = await request.json()
-    const { amount, type } = body
+    const validatedData = validateRequestBody(walletUpdateSchema, body)
+    const { amount, type } = validatedData
 
     const merchant = await prisma.merchant.findUnique({
       where: { id },
     })
 
     if (!merchant) {
-      return NextResponse.json({ error: "Merchant not found" }, { status: 404 })
+      throw new AppError("Merchant not found", 404, "MERCHANT_NOT_FOUND")
     }
 
     const newBalance = type === "ADD" 
@@ -23,7 +26,11 @@ export async function POST(
       : merchant.walletBalance - amount
 
     if (newBalance < 0) {
-      return NextResponse.json({ error: "Insufficient balance" }, { status: 400 })
+      throw new AppError(
+        "Insufficient balance for this operation",
+        400,
+        "INSUFFICIENT_BALANCE"
+      )
     }
 
     const updatedMerchant = await prisma.merchant.update({
@@ -33,7 +40,6 @@ export async function POST(
 
     return NextResponse.json(updatedMerchant)
   } catch (error) {
-    console.error("Error updating wallet:", error)
-    return NextResponse.json({ error: "Failed to update wallet" }, { status: 500 })
+    return handleApiError(error)
   }
 }

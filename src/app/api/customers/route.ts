@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { customerSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody } from "@/lib/errors"
 
 export async function GET() {
   try {
@@ -9,33 +11,36 @@ export async function GET() {
         _count: {
           select: { transactions: true, redemptions: true }
         }
-      }
+      },
+      take: 100,
     })
     return NextResponse.json(customers)
   } catch (error) {
-    console.error("Error fetching customers:", error)
-    return NextResponse.json({ error: "Failed to fetch customers" }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { name, phone } = body
+    const validatedData = validateRequestBody(customerSchema, body)
 
     let customer = await prisma.customer.findUnique({
-      where: { phone },
+      where: { phone: validatedData.phone },
     })
 
     if (!customer) {
       customer = await prisma.customer.create({
-        data: { name, phone, totalPoints: 0 },
+        data: { 
+          name: validatedData.name, 
+          phone: validatedData.phone, 
+          totalPoints: 0 
+        },
       })
     }
 
-    return NextResponse.json(customer, { status: 201 })
+    return NextResponse.json(customer, { status: customer ? 200 : 201 })
   } catch (error) {
-    console.error("Error creating customer:", error)
-    return NextResponse.json({ error: "Failed to create customer" }, { status: 500 })
+    return handleApiError(error)
   }
 }

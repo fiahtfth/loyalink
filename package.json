@@ -8,23 +8,28 @@
     "start": "next start",
     "lint": "eslint",
     "postinstall": "prisma generate",
-    "vercel-build": "prisma db push --accept-data-loss && next build"
+    "vercel-build": "prisma generate && next build",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma db push --force-reset && npm run db:seed"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0",
+    "@prisma/client": "^5.19.0",
     "@radix-ui/react-slot": "^1.2.4",
+    "@supabase/supabase-js": "^2.90.0",
+    "@t3-oss/env-nextjs": "^0.13.8",
     "@types/qrcode.react": "^1.0.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.559.0",
     "next": "16.0.8",
-    "prisma": "^5.22.0",
+    "prisma": "^5.19.0",
     "qrcode": "^1.5.4",
     "qrcode.react": "^4.2.0",
     "react": "19.2.1",
     "react-dom": "19.2.1",
     "react-qrcode-logo": "^4.0.0",
     "tailwind-merge": "^3.4.0",
+    "zod": "^4.1.13",
     "zustand": "^5.0.9"
   },
   "devDependencies": {
@@ -36,6 +41,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.0.8",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
