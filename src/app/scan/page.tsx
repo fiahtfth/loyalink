@@ -13,7 +13,7 @@ interface Merchant {
   id: string
   shopName: string
   category: string
-  pointsRate: number
+  walletBalance: number
 }
 
 function ScanPageContent() {
@@ -47,9 +47,10 @@ function ScanPageContent() {
     try {
       const res = await fetch("/api/merchants")
       const data = await res.json()
-      setMerchants(data.filter((m: Merchant & { isActive: boolean }) => m.isActive))
+      setMerchants(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("Error fetching merchants:", error)
+      setMerchants([])
     }
   }
 
@@ -99,9 +100,7 @@ function ScanPageContent() {
   }
 
   const selectedMerchantData = merchants.find(m => m.id === selectedMerchant)
-  const estimatedPoints = amount && selectedMerchantData 
-    ? Math.floor((parseFloat(amount) / 100) * selectedMerchantData.pointsRate)
-    : 0
+  const estimatedPoints = amount ? Math.floor(parseFloat(amount) / 100) : 0
 
   if (success) {
     const whatsappMessage = `🎉 Congratulations! You earned ${success.pointsEarned} LOYALINK points at ${success.merchantName}!\n\n💰 Your total balance: ${success.newTotalPoints} points\n\n✨ Redeem your points at any LOYALINK partner shop!\n\nPowered by LOYALINK - One QR Code. Infinite Rewards.`

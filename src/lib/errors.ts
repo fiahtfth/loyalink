@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { Prisma } from "@prisma/client";
 
 export class AppError extends Error {
   constructor(
@@ -36,14 +35,16 @@ export function handleApiError(error: unknown) {
     );
   }
 
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    if (error.code === "P2002") {
+  // Handle Supabase errors
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const supaError = error as { code: string; message?: string; details?: string }
+    if (supaError.code === "23505") {
       return NextResponse.json(
         { error: "A record with this unique field already exists" },
         { status: 409 }
       );
     }
-    if (error.code === "P2025") {
+    if (supaError.code === "PGRST116") {
       return NextResponse.json(
         { error: "Record not found" },
         { status: 404 }
@@ -51,8 +52,9 @@ export function handleApiError(error: unknown) {
     }
   }
 
+  const msg = error instanceof Error ? error.message : "Internal server error"
   return NextResponse.json(
-    { error: "Internal server error" },
+    { error: msg },
     { status: 500 }
   );
 }

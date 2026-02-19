@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { earnTransactionSchema } from "@/lib/validations"
 import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
-import { updateCustomerTier } from "@/lib/tier-utils"
-import { createLedgerEntry } from "@/lib/ledger-utils"
+import { genId } from "@/lib/utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,12 +10,14 @@ export async function POST(request: NextRequest) {
     const validatedData = validateRequestBody(earnTransactionSchema, body)
     const { merchantId, customerPhone, customerName, amount } = validatedData
 
-    const merchant = await prisma.merchant.findUnique({
-      where: { id: merchantId },
-      include: { mall: true },
-    })
+    // Fetch merchant
+    const { data: merchant, error: merchantErr } = await supabase
+      .from("Merchant")
+      .select("*")
+      .eq("id", merchantId)
+      .single()
 
-    if (!merchant) {
+    if (merchantErr || !merchant) {
       throw new AppError("Merchant not found", 404, "MERCHANT_NOT_FOUND")
     }
 
@@ -24,26 +25,46 @@ export async function POST(request: NextRequest) {
       throw new AppError("Merchant is not active", 400, "MERCHANT_INACTIVE")
     }
 
-    let customer = await prisma.customer.findUnique({
-      where: { phone: customerPhone },
-    })
+    // Find or create customer
+    let { data: customer } = await supabase
+      .from("Customer")
+      .select("*")
+      .eq("phone", customerPhone)
+      .single()
 
     if (!customer) {
-      customer = await prisma.customer.create({
-        data: { 
-          name: customerName || "Customer", 
+      const { data: newCustomer, error: createErr } = await supabase
+        .from("Customer")
+        .insert({
+          id: genId(),
+          name: customerName || "Customer",
           phone: customerPhone,
-          totalPoints: 0
-        },
-      })
+          totalPoints: 0,
+        })
+        .select()
+        .single()
+
+      if (createErr) throw createErr
+      customer = newCustomer
     }
 
-    const categoryEarnRate = await prisma.categoryEarnRate.findUnique({
-      where: { category: merchant.category },
-    })
+    // Get category earn rate
+    const { data: categoryEarnRate } = await supabase
+      .from("CategoryEarnRate")
+      .select("*")
+      .eq("category", merchant.category)
+      .single()
 
     const earnRate = categoryEarnRate?.earnRate || 1.0
     const pointsEarned = Math.floor((amount / 100) * earnRate)
+
+    if (pointsEarned === 0) {
+      throw new AppError(
+        "Purchase amount too low to earn points",
+        400,
+        "AMOUNT_TOO_LOW"
+      )
+    }
 
     if (merchant.walletBalance < pointsEarned) {
       throw new AppError(
@@ -53,55 +74,57 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      const transaction = await tx.transaction.create({
-        data: {
-          merchantId,
-          customerId: customer.id,
-          amount,
-          pointsEarned,
-          type: "EARN",
-          earnMerchantId: merchantId,
-        },
+    // Create transaction
+    const { data: transaction, error: txnErr } = await supabase
+      .from("Transaction")
+      .insert({
+        id: genId(),
+        merchantId,
+        customerId: customer!.id,
+        amount,
+        pointsEarned,
+        type: "EARN",
+        earnMerchantId: merchantId,
       })
+      .select()
+      .single()
 
-      await tx.customer.update({
-        where: { id: customer.id },
-        data: { totalPoints: { increment: pointsEarned } },
-      })
+    if (txnErr) throw txnErr
 
-      await tx.merchant.update({
-        where: { id: merchantId },
-        data: { walletBalance: { decrement: pointsEarned } },
-      })
+    // Update customer points
+    await supabase
+      .from("Customer")
+      .update({ totalPoints: customer!.totalPoints + pointsEarned })
+      .eq("id", customer!.id)
 
-      await tx.ledger.create({
-        data: {
-          customerId: customer.id,
-          merchantId,
-          mallId: merchant.mallId,
-          entryType: "EARN",
-          points: pointsEarned,
-          cashEquivalent: amount,
-          description: `Earned ${pointsEarned} points on purchase of ₹${amount} at ${merchant.shopName}`,
-          metadata: {
-            earnRate,
-            category: merchant.category,
-            transactionId: transaction.id,
-          },
-        },
-      })
+    // Deduct from merchant wallet
+    await supabase
+      .from("Merchant")
+      .update({ walletBalance: merchant.walletBalance - pointsEarned })
+      .eq("id", merchantId)
 
-      return transaction
+    // Create ledger entry
+    await supabase.from("Ledger").insert({
+      id: genId(),
+      customerId: customer!.id,
+      merchantId,
+      mallId: merchant.mallId || null,
+      entryType: "EARN",
+      points: pointsEarned,
+      cashEquivalent: amount,
+      description: `Earned ${pointsEarned} points on purchase of ₹${amount} at ${merchant.shopName}`,
+      metadata: {
+        earnRate,
+        category: merchant.category,
+        transactionId: transaction.id,
+      },
     })
-
-    await updateCustomerTier(customer.id, merchantId, amount)
 
     return NextResponse.json({
       success: true,
-      transaction: result,
+      transaction,
       pointsEarned,
-      newTotalPoints: customer.totalPoints + pointsEarned,
+      newTotalPoints: customer!.totalPoints + pointsEarned,
       message: `Earned ${pointsEarned} points at ${merchant.shopName}!`,
       earnRate,
     }, { status: 201 })

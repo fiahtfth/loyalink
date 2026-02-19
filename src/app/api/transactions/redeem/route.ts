@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { redeemTransactionSchema } from "@/lib/validations"
 import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
-import { getCustomerTierAtMerchant } from "@/lib/tier-utils"
-import { createLedgerEntry } from "@/lib/ledger-utils"
+import { genId } from "@/lib/utils"
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,12 +10,14 @@ export async function POST(request: NextRequest) {
     const validatedData = validateRequestBody(redeemTransactionSchema, body)
     const { merchantId, customerPhone, pointsToRedeem, otp } = validatedData
 
-    const merchant = await prisma.merchant.findUnique({
-      where: { id: merchantId },
-      include: { mall: true },
-    })
+    // Fetch merchant
+    const { data: merchant, error: merchantErr } = await supabase
+      .from("Merchant")
+      .select("*")
+      .eq("id", merchantId)
+      .single()
 
-    if (!merchant) {
+    if (merchantErr || !merchant) {
       throw new AppError("Merchant not found", 404, "MERCHANT_NOT_FOUND")
     }
 
@@ -24,11 +25,14 @@ export async function POST(request: NextRequest) {
       throw new AppError("Merchant is not active", 400, "MERCHANT_INACTIVE")
     }
 
-    const customer = await prisma.customer.findUnique({
-      where: { phone: customerPhone },
-    })
+    // Fetch customer
+    const { data: customer, error: custErr } = await supabase
+      .from("Customer")
+      .select("*")
+      .eq("phone", customerPhone)
+      .single()
 
-    if (!customer) {
+    if (custErr || !customer) {
       throw new AppError("Customer not found", 404, "CUSTOMER_NOT_FOUND")
     }
 
@@ -43,156 +47,65 @@ export async function POST(request: NextRequest) {
     const discount = pointsToRedeem
     const settlementAmount = pointsToRedeem * merchant.settlementRate
 
-    const lastEarnTransaction = await prisma.transaction.findFirst({
-      where: {
+    // Create redemption
+    const { data: redemption, error: redeemErr } = await supabase
+      .from("Redemption")
+      .insert({
+        id: genId(),
+        merchantId,
         customerId: customer.id,
-        type: "EARN",
+        pointsUsed: pointsToRedeem,
+        discount,
+        settlementAmount,
+        isHomeStore: false,
+        homeStoreBonusPoints: 0,
+        tierBonusPoints: 0,
+        mallBonusPoints: 0,
+        otpVerified: !!otp,
+      })
+      .select()
+      .single()
+
+    if (redeemErr) throw redeemErr
+
+    // Deduct points from customer
+    await supabase
+      .from("Customer")
+      .update({ totalPoints: customer.totalPoints - pointsToRedeem })
+      .eq("id", customer.id)
+
+    // Credit settlement to merchant wallet
+    await supabase
+      .from("Merchant")
+      .update({ walletBalance: merchant.walletBalance + settlementAmount })
+      .eq("id", merchantId)
+
+    // Create ledger entry
+    await supabase.from("Ledger").insert({
+      id: genId(),
+      customerId: customer.id,
+      merchantId,
+      mallId: merchant.mallId || null,
+      entryType: "REDEEM",
+      points: -pointsToRedeem,
+      cashEquivalent: discount,
+      description: `Redeemed ${pointsToRedeem} points for ₹${discount} at ${merchant.shopName}`,
+      metadata: {
+        settlementRate: merchant.settlementRate,
+        settlementAmount,
+        redemptionId: redemption.id,
       },
-      orderBy: { createdAt: "desc" },
     })
 
-    const isHomeStore = lastEarnTransaction?.earnMerchantId === merchantId
-    const customerTier = await getCustomerTierAtMerchant(customer.id, merchantId)
-
-    let homeStoreBonusPoints = 0
-    let tierBonusPoints = 0
-    let mallBonusPoints = 0
-
-    if (isHomeStore && customerTier) {
-      tierBonusPoints = Math.floor(pointsToRedeem * customerTier.tierBonusRate)
-      homeStoreBonusPoints = tierBonusPoints
-    }
-
-    if (merchant.mall?.bonusEnabled && merchant.mall.bonusWallet > 0 && lastEarnTransaction?.merchantId) {
-      const earnMerchant = await prisma.merchant.findUnique({
-        where: { id: lastEarnTransaction.merchantId },
-      })
-      
-      if (earnMerchant?.mallId === merchant.mallId) {
-        const potentialMallBonus = Math.floor(pointsToRedeem * merchant.mall.bonusRate)
-        mallBonusPoints = Math.min(potentialMallBonus, merchant.mall.bonusWallet)
-      }
-    }
-
-    const totalBonusPoints = homeStoreBonusPoints + mallBonusPoints
-
-    const result = await prisma.$transaction(async (tx) => {
-      const redemption = await tx.redemption.create({
-        data: {
-          merchantId,
-          customerId: customer.id,
-          pointsUsed: pointsToRedeem,
-          discount,
-          settlementAmount,
-          isHomeStore,
-          homeStoreBonusPoints,
-          tierBonusPoints,
-          mallBonusPoints,
-          otpVerified: !!otp,
-        },
-      })
-
-      await tx.customer.update({
-        where: { id: customer.id },
-        data: { totalPoints: { decrement: pointsToRedeem } },
-      })
-
-      await tx.merchant.update({
-        where: { id: merchantId },
-        data: { walletBalance: { increment: settlementAmount } },
-      })
-
-      await tx.ledger.create({
-        data: {
-          customerId: customer.id,
-          merchantId,
-          mallId: merchant.mallId,
-          entryType: "REDEEM",
-          points: -pointsToRedeem,
-          cashEquivalent: discount,
-          description: `Redeemed ${pointsToRedeem} points for ₹${discount} at ${merchant.shopName}`,
-          metadata: {
-            settlementRate: merchant.settlementRate,
-            settlementAmount,
-            isHomeStore,
-            redemptionId: redemption.id,
-          },
-        },
-      })
-
-      if (homeStoreBonusPoints > 0) {
-        await tx.customer.update({
-          where: { id: customer.id },
-          data: { totalPoints: { increment: homeStoreBonusPoints } },
-        })
-
-        await tx.ledger.create({
-          data: {
-            customerId: customer.id,
-            merchantId,
-            mallId: merchant.mallId,
-            entryType: "HOME_STORE_BONUS",
-            points: homeStoreBonusPoints,
-            cashEquivalent: 0,
-            description: `Home-store loyalty bonus: ${homeStoreBonusPoints} points (${customerTier.tier} tier)`,
-            metadata: {
-              tier: customerTier.tier,
-              bonusRate: customerTier.tierBonusRate,
-              redemptionId: redemption.id,
-            },
-          },
-        })
-      }
-
-      if (mallBonusPoints > 0 && merchant.mall) {
-        await tx.customer.update({
-          where: { id: customer.id },
-          data: { totalPoints: { increment: mallBonusPoints } },
-        })
-
-        await tx.mall.update({
-          where: { id: merchant.mallId! },
-          data: { bonusWallet: { decrement: mallBonusPoints } },
-        })
-
-        await tx.ledger.create({
-          data: {
-            customerId: customer.id,
-            merchantId,
-            mallId: merchant.mallId,
-            entryType: "MALL_BONUS",
-            points: mallBonusPoints,
-            cashEquivalent: 0,
-            description: `Mall loyalty bonus: ${mallBonusPoints} points at ${merchant.mall.name}`,
-            metadata: {
-              mallName: merchant.mall.name,
-              bonusRate: merchant.mall.bonusRate,
-              redemptionId: redemption.id,
-            },
-          },
-        })
-      }
-
-      return redemption
-    })
-
-    const newTotalPoints = customer.totalPoints - pointsToRedeem + totalBonusPoints
+    const newTotalPoints = customer.totalPoints - pointsToRedeem
 
     return NextResponse.json({
       success: true,
-      redemption: result,
+      redemption,
       discount,
       settlementAmount,
       remainingPoints: newTotalPoints,
-      bonuses: {
-        homeStoreBonus: homeStoreBonusPoints,
-        tierBonus: tierBonusPoints,
-        mallBonus: mallBonusPoints,
-        total: totalBonusPoints,
-      },
-      isHomeStore,
-      tier: customerTier.tier,
-      message: `Redeemed ${pointsToRedeem} points for ₹${discount} discount at ${merchant.shopName}!${totalBonusPoints > 0 ? ` Earned ${totalBonusPoints} bonus points!` : ''}`
+      message: `Redeemed ${pointsToRedeem} points for ₹${discount} discount at ${merchant.shopName}!`,
     }, { status: 201 })
   } catch (error) {
     return handleApiError(error)

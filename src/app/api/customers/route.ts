@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { customerSchema } from "@/lib/validations"
 import { handleApiError, validateRequestBody } from "@/lib/errors"
+import { genId } from "@/lib/utils"
 
 export async function GET() {
   try {
-    const customers = await prisma.customer.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        _count: {
-          select: { transactions: true, redemptions: true }
-        }
-      },
-      take: 100,
-    })
-    return NextResponse.json(customers)
+    const { data: customers, error } = await supabase
+      .from("Customer")
+      .select("*")
+      .order("createdAt", { ascending: false })
+      .limit(100)
+
+    if (error) throw error
+
+    return NextResponse.json(customers || [])
   } catch (error) {
     return handleApiError(error)
   }
@@ -25,21 +25,30 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const validatedData = validateRequestBody(customerSchema, body)
 
-    let customer = await prisma.customer.findUnique({
-      where: { phone: validatedData.phone },
-    })
+    const { data: existing } = await supabase
+      .from("Customer")
+      .select("*")
+      .eq("phone", validatedData.phone)
+      .single()
 
-    if (!customer) {
-      customer = await prisma.customer.create({
-        data: { 
-          name: validatedData.name, 
-          phone: validatedData.phone, 
-          totalPoints: 0 
-        },
-      })
+    if (existing) {
+      return NextResponse.json(existing, { status: 200 })
     }
 
-    return NextResponse.json(customer, { status: customer ? 200 : 201 })
+    const { data: customer, error } = await supabase
+      .from("Customer")
+      .insert({
+        id: genId(),
+        name: validatedData.name,
+        phone: validatedData.phone,
+        totalPoints: 0,
+      })
+      .select()
+      .single()
+
+    if (error) throw error
+
+    return NextResponse.json(customer, { status: 201 })
   } catch (error) {
     return handleApiError(error)
   }

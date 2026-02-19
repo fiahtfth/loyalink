@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 
 export async function GET() {
   try {
-    await prisma.$queryRaw`SELECT 1`
+    const { error } = await supabase.from("Merchant").select("id").limit(1)
     
     return NextResponse.json({
-      status: "healthy",
+      status: error ? "unhealthy" : "healthy",
       timestamp: new Date().toISOString(),
-      database: "connected",
+      database: error ? "disconnected" : "connected",
       environment: process.env.NODE_ENV,
-    })
+    }, { status: error ? 503 : 200 })
   } catch (error) {
     console.error("Health check failed:", error)
     return NextResponse.json(

@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { categoryEarnRateSchema } from "@/lib/validations"
 import { handleApiError, validateRequestBody } from "@/lib/errors"
+import { genId } from "@/lib/utils"
 
 export async function GET() {
   try {
-    const rates = await prisma.categoryEarnRate.findMany({
-      where: { isActive: true },
-      orderBy: { category: "asc" },
-    })
+    const { data: rates, error } = await supabase
+      .from("CategoryEarnRate")
+      .select("*")
+      .eq("isActive", true)
+      .order("category", { ascending: true })
 
-    return NextResponse.json(rates)
+    if (error) throw error
+    return NextResponse.json(rates || [])
   } catch (error) {
     return handleApiError(error)
   }
@@ -21,14 +24,31 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const validatedData = validateRequestBody(categoryEarnRateSchema, body)
 
-    const rate = await prisma.categoryEarnRate.upsert({
-      where: { category: validatedData.category },
-      update: { earnRate: validatedData.earnRate },
-      create: {
-        category: validatedData.category,
-        earnRate: validatedData.earnRate,
-      },
-    })
+    const { data: existing } = await supabase
+      .from("CategoryEarnRate")
+      .select("*")
+      .eq("category", validatedData.category)
+      .single()
+
+    let rate
+    if (existing) {
+      const { data, error } = await supabase
+        .from("CategoryEarnRate")
+        .update({ earnRate: validatedData.earnRate })
+        .eq("id", existing.id)
+        .select()
+        .single()
+      if (error) throw error
+      rate = data
+    } else {
+      const { data, error } = await supabase
+        .from("CategoryEarnRate")
+        .insert({ id: genId(), category: validatedData.category, earnRate: validatedData.earnRate })
+        .select()
+        .single()
+      if (error) throw error
+      rate = data
+    }
 
     return NextResponse.json(rate, { status: 201 })
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { walletUpdateSchema } from "@/lib/validations"
 import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
 
@@ -13,11 +13,13 @@ export async function POST(
     const validatedData = validateRequestBody(walletUpdateSchema, body)
     const { amount, type } = validatedData
 
-    const merchant = await prisma.merchant.findUnique({
-      where: { id },
-    })
+    const { data: merchant, error: fetchError } = await supabase
+      .from("Merchant")
+      .select("*")
+      .eq("id", id)
+      .single()
 
-    if (!merchant) {
+    if (fetchError || !merchant) {
       throw new AppError("Merchant not found", 404, "MERCHANT_NOT_FOUND")
     }
 
@@ -33,10 +35,14 @@ export async function POST(
       )
     }
 
-    const updatedMerchant = await prisma.merchant.update({
-      where: { id },
-      data: { walletBalance: newBalance },
-    })
+    const { data: updatedMerchant, error: updateError } = await supabase
+      .from("Merchant")
+      .update({ walletBalance: newBalance })
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (updateError) throw updateError
 
     return NextResponse.json(updatedMerchant)
   } catch (error) {

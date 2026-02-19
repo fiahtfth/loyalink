@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { handleApiError, AppError } from "@/lib/errors"
 
 export async function GET(
@@ -9,95 +9,35 @@ export async function GET(
   try {
     const { phone } = await params
 
-    const customer = await prisma.customer.findUnique({
-      where: { phone },
-    })
+    const { data: customer, error } = await supabase
+      .from("Customer")
+      .select("*")
+      .eq("phone", phone)
+      .single()
 
-    if (!customer) {
+    if (error || !customer) {
       throw new AppError("Customer not found", 404, "CUSTOMER_NOT_FOUND")
     }
 
-    const [
-      totalTransactions,
-      totalRedemptions,
-      totalPointsEarned,
-      totalPointsRedeemed,
-      totalSpent,
-      recentTransactions,
-      recentRedemptions,
-      merchantsVisited,
-    ] = await Promise.all([
-      // Total transactions count
-      prisma.transaction.count({
-        where: { customerId: customer.id },
-      }),
-      // Total redemptions count
-      prisma.redemption.count({
-        where: { customerId: customer.id },
-      }),
-      // Total points earned
-      prisma.transaction.aggregate({
-        where: { customerId: customer.id },
-        _sum: { pointsEarned: true },
-      }),
-      // Total points redeemed
-      prisma.redemption.aggregate({
-        where: { customerId: customer.id },
-        _sum: { pointsUsed: true },
-      }),
-      // Total amount spent
-      prisma.transaction.aggregate({
-        where: { customerId: customer.id },
-        _sum: { amount: true },
-      }),
-      // Recent transactions (last 10)
-      prisma.transaction.findMany({
-        where: { customerId: customer.id },
-        include: {
-          merchant: {
-            select: { shopName: true, category: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-      }),
-      // Recent redemptions (last 10)
-      prisma.redemption.findMany({
-        where: { customerId: customer.id },
-        include: {
-          merchant: {
-            select: { shopName: true, category: true },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: 10,
-      }),
-      // Unique merchants visited
-      prisma.transaction.groupBy({
-        by: ["merchantId"],
-        where: { customerId: customer.id },
-        _count: { merchantId: true },
-        _sum: { amount: true, pointsEarned: true },
-        orderBy: { _count: { merchantId: "desc" } },
-      }),
+    const [txnRes, redemptionRes] = await Promise.all([
+      supabase
+        .from("Transaction")
+        .select("*, Merchant(shopName, category)")
+        .eq("customerId", customer.id)
+        .order("createdAt", { ascending: false }),
+      supabase
+        .from("Redemption")
+        .select("*, Merchant(shopName, category)")
+        .eq("customerId", customer.id)
+        .order("createdAt", { ascending: false }),
     ])
 
-    // Get merchant details for visited merchants
-    const merchantIds = merchantsVisited.map((m) => m.merchantId)
-    const merchantDetails = await prisma.merchant.findMany({
-      where: { id: { in: merchantIds } },
-      select: { id: true, shopName: true, category: true },
-    })
+    const transactions = txnRes.data || []
+    const redemptions = redemptionRes.data || []
 
-    const merchantsWithDetails = merchantsVisited.map((mv) => {
-      const merchant = merchantDetails.find((m) => m.id === mv.merchantId)
-      return {
-        merchant,
-        visitCount: mv._count.merchantId,
-        totalSpent: mv._sum.amount || 0,
-        totalPointsEarned: mv._sum.pointsEarned || 0,
-      }
-    })
+    const totalPointsEarned = transactions.reduce((sum, t) => sum + (t.pointsEarned || 0), 0)
+    const totalPointsRedeemed = redemptions.reduce((sum, r) => sum + (r.pointsUsed || 0), 0)
+    const totalSpent = transactions.reduce((sum, t) => sum + (t.amount || 0), 0)
 
     return NextResponse.json({
       customer: {
@@ -108,21 +48,23 @@ export async function GET(
         memberSince: customer.createdAt,
       },
       stats: {
-        totalTransactions,
-        totalRedemptions,
-        totalPointsEarned: totalPointsEarned._sum.pointsEarned || 0,
-        totalPointsRedeemed: totalPointsRedeemed._sum.pointsUsed || 0,
+        totalTransactions: transactions.length,
+        totalRedemptions: redemptions.length,
+        totalPointsEarned,
+        totalPointsRedeemed,
         currentPoints: customer.totalPoints,
-        totalSpent: totalSpent._sum.amount || 0,
+        totalSpent,
         averageTransactionValue:
-          totalTransactions > 0
-            ? (totalSpent._sum.amount || 0) / totalTransactions
-            : 0,
-        merchantsVisited: merchantsVisited.length,
+          transactions.length > 0 ? totalSpent / transactions.length : 0,
       },
-      recentTransactions,
-      recentRedemptions,
-      favoritesMerchants: merchantsWithDetails.slice(0, 5),
+      recentTransactions: transactions.slice(0, 10).map((t) => ({
+        ...t,
+        merchant: t.Merchant,
+      })),
+      recentRedemptions: redemptions.slice(0, 10).map((r) => ({
+        ...r,
+        merchant: r.Merchant,
+      })),
     })
   } catch (error) {
     return handleApiError(error)

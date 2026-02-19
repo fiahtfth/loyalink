@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { getCustomerLedger, getMerchantLedger } from "@/lib/ledger-utils"
+import { supabase } from "@/lib/supabase"
 import { handleApiError, AppError } from "@/lib/errors"
 
 export async function GET(request: NextRequest) {
@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const customerId = searchParams.get("customerId")
     const merchantId = searchParams.get("merchantId")
-    const entryType = searchParams.get("entryType") as any
+    const entryType = searchParams.get("entryType")
     const limit = parseInt(searchParams.get("limit") || "50")
     const offset = parseInt(searchParams.get("offset") || "0")
 
@@ -19,31 +19,25 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    let result
-    if (customerId) {
-      result = await getCustomerLedger(customerId, {
-        merchantId: merchantId || undefined,
-        entryType,
-        limit,
-        offset,
-      })
-    } else if (merchantId) {
-      result = await getMerchantLedger(merchantId, {
-        customerId: customerId || undefined,
-        entryType,
-        limit,
-        offset,
-      })
-    }
+    let query = supabase
+      .from("Ledger")
+      .select("*, Merchant(shopName, category), Customer(name, phone)")
+      .order("createdAt", { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (customerId) query = query.eq("customerId", customerId)
+    if (merchantId) query = query.eq("merchantId", merchantId)
+    if (entryType) query = query.eq("entryType", entryType)
+
+    const { data: entries, error } = await query
+    if (error) throw error
 
     return NextResponse.json({
-      entries: result?.entries || [],
-      total: result?.total || 0,
-      pagination: {
-        limit,
-        offset,
-        hasMore: (offset + limit) < (result?.total || 0),
-      },
+      entries: (entries || []).map((e) => ({
+        ...e,
+        merchant: e.Merchant,
+        customer: e.Customer,
+      })),
     })
   } catch (error) {
     return handleApiError(error)

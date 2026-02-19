@@ -13,7 +13,7 @@ export const merchantSchema = z.object({
   phone: z.string().regex(phoneRegex, "Invalid Indian phone number"),
   category: z.string().min(2).max(100),
   address: z.string().min(5).max(500),
-  mallId: z.string().cuid().optional(),
+  mallId: z.string().min(1).optional(),
   settlementRate: z.number().min(0.8).max(0.9).default(0.85),
 });
 
@@ -25,14 +25,14 @@ export const mallSchema = z.object({
 });
 
 export const earnTransactionSchema = z.object({
-  merchantId: z.string().cuid(),
+  merchantId: z.string().min(1),
   customerPhone: z.string().regex(phoneRegex, "Invalid Indian phone number"),
   customerName: z.string().min(2).max(100),
   amount: z.number().positive().min(1).max(1000000),
 });
 
 export const redeemTransactionSchema = z.object({
-  merchantId: z.string().cuid(),
+  merchantId: z.string().min(1),
   customerPhone: z.string().regex(phoneRegex, "Invalid Indian phone number"),
   pointsToRedeem: z.number().positive().int().min(1).max(100000),
   otp: z.string().length(6).optional(),

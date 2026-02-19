@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 import { handleApiError } from "@/lib/errors"
 
 export async function GET(request: NextRequest) {
@@ -8,48 +8,28 @@ export async function GET(request: NextRequest) {
     const merchantId = searchParams.get("merchantId")
     const customerId = searchParams.get("customerId")
     const type = searchParams.get("type")
-    const limit = parseInt(searchParams.get("limit") || "50")
+    const limit = Math.min(parseInt(searchParams.get("limit") || "50"), 100)
     const offset = parseInt(searchParams.get("offset") || "0")
 
-    const where: any = {}
-    if (merchantId) where.merchantId = merchantId
-    if (customerId) where.customerId = customerId
-    if (type) where.type = type
+    let query = supabase
+      .from("Transaction")
+      .select("*, Merchant(id, shopName, category), Customer(id, name, phone)")
+      .order("createdAt", { ascending: false })
+      .range(offset, offset + limit - 1)
 
-    const [transactions, total] = await Promise.all([
-      prisma.transaction.findMany({
-        where,
-        include: {
-          merchant: {
-            select: {
-              id: true,
-              shopName: true,
-              category: true,
-            },
-          },
-          customer: {
-            select: {
-              id: true,
-              name: true,
-              phone: true,
-            },
-          },
-        },
-        orderBy: { createdAt: "desc" },
-        take: Math.min(limit, 100),
-        skip: offset,
-      }),
-      prisma.transaction.count({ where }),
-    ])
+    if (merchantId) query = query.eq("merchantId", merchantId)
+    if (customerId) query = query.eq("customerId", customerId)
+    if (type) query = query.eq("type", type)
+
+    const { data: transactions, error } = await query
+    if (error) throw error
 
     return NextResponse.json({
-      transactions,
-      pagination: {
-        total,
-        limit,
-        offset,
-        hasMore: offset + limit < total,
-      },
+      transactions: (transactions || []).map((t) => ({
+        ...t,
+        merchant: t.Merchant,
+        customer: t.Customer,
+      })),
     })
   } catch (error) {
     return handleApiError(error)

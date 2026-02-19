@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
+import { supabase } from "@/lib/supabase"
 
 export async function GET(
   request: NextRequest,
@@ -7,27 +7,36 @@ export async function GET(
 ) {
   try {
     const { id } = await params
-    const merchant = await prisma.merchant.findUnique({
-      where: { id },
-      include: {
-        transactions: {
-          orderBy: { createdAt: "desc" },
-          take: 10,
-          include: { customer: true }
-        },
-        redemptions: {
-          orderBy: { createdAt: "desc" },
-          take: 10,
-          include: { customer: true }
-        }
-      }
-    })
 
-    if (!merchant) {
+    const { data: merchant, error } = await supabase
+      .from("Merchant")
+      .select("*")
+      .eq("id", id)
+      .single()
+
+    if (error || !merchant) {
       return NextResponse.json({ error: "Merchant not found" }, { status: 404 })
     }
 
-    return NextResponse.json(merchant)
+    const { data: transactions } = await supabase
+      .from("Transaction")
+      .select("*, Customer(*)")
+      .eq("merchantId", id)
+      .order("createdAt", { ascending: false })
+      .limit(10)
+
+    const { data: redemptions } = await supabase
+      .from("Redemption")
+      .select("*, Customer(*)")
+      .eq("merchantId", id)
+      .order("createdAt", { ascending: false })
+      .limit(10)
+
+    return NextResponse.json({
+      ...merchant,
+      transactions: (transactions || []).map((t) => ({ ...t, customer: t.Customer })),
+      redemptions: (redemptions || []).map((r) => ({ ...r, customer: r.Customer })),
+    })
   } catch (error) {
     console.error("Error fetching merchant:", error)
     return NextResponse.json({ error: "Failed to fetch merchant" }, { status: 500 })
@@ -42,10 +51,14 @@ export async function PATCH(
     const { id } = await params
     const body = await request.json()
 
-    const merchant = await prisma.merchant.update({
-      where: { id },
-      data: body,
-    })
+    const { data: merchant, error } = await supabase
+      .from("Merchant")
+      .update(body)
+      .eq("id", id)
+      .select()
+      .single()
+
+    if (error) throw error
 
     return NextResponse.json(merchant)
   } catch (error) {

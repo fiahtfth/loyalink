@@ -1,8 +1,13 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
+import { randomUUID } from "crypto"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
+}
+
+export function genId(): string {
+  return randomUUID()
 }
 
 export function formatCurrency(amount: number): string {

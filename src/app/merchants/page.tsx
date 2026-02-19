@@ -53,7 +53,6 @@ export default function MerchantsPage() {
     phone: "",
     category: "Kirana Store",
     address: "",
-    pointsRate: "1"
   })
 
   useEffect(() => {
@@ -64,9 +63,10 @@ export default function MerchantsPage() {
     try {
       const res = await fetch("/api/merchants")
       const data = await res.json()
-      setMerchants(data)
+      setMerchants(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("Error fetching merchants:", error)
+      setMerchants([])
     } finally {
       setLoading(false)
     }
@@ -78,13 +78,10 @@ export default function MerchantsPage() {
       const res = await fetch("/api/merchants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...formData,
-          pointsRate: parseFloat(formData.pointsRate)
-        })
+        body: JSON.stringify(formData)
       })
       if (res.ok) {
-        setFormData({ name: "", shopName: "", phone: "", category: "Kirana Store", address: "", pointsRate: "1" })
+        setFormData({ name: "", shopName: "", phone: "", category: "Kirana Store", address: "" })
         setShowForm(false)
         fetchMerchants()
       }

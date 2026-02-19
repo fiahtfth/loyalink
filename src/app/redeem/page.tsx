@@ -45,9 +45,10 @@ export default function RedeemPage() {
     try {
       const res = await fetch("/api/merchants")
       const data = await res.json()
-      setMerchants(data.filter((m: Merchant & { isActive: boolean }) => m.isActive))
+      setMerchants(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error("Error fetching merchants:", error)
+      setMerchants([])
     }
   }
 
