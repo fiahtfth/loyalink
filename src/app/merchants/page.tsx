@@ -18,7 +18,6 @@ interface Merchant {
   category: string
   address: string
   walletBalance: number
-  pointsRate: number
   isActive: boolean
   createdAt: string
   _count?: {

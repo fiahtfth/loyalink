@@ -12,14 +12,14 @@ LOYALINK is a shared rewards platform that enables small businesses to offer loy
 - **📱 QR Code Integration**: Simple scan-to-earn and scan-to-redeem workflow
 - **🔄 Universal Redemption**: Points earned at one store can be used at any participating merchant
 - **🛡️ Production-Ready**: Built with security, validation, and error handling
-- **⚡ Modern Stack**: Next.js 16, React 19, Prisma, TypeScript, Tailwind CSS
+- **⚡ Modern Stack**: Next.js 16, React 19, Supabase, TypeScript, Tailwind CSS
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Node.js 18+ and npm
-- PostgreSQL database (or SQLite for local development)
+- Supabase account (free tier works)
 
 ### Installation
 
@@ -38,18 +38,18 @@ LOYALINK is a shared rewards platform that enables small businesses to offer loy
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` and configure your `DATABASE_URL`
+   Edit `.env` and add your Supabase credentials:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 
 4. **Initialize the database**
    ```bash
-   # Generate Prisma Client
-   npx prisma generate
+   # Link to your Supabase project
+   supabase link --project-ref <your-project-ref>
    
-   # Run migrations (for PostgreSQL)
-   npx prisma migrate dev --name init
-   
-   # OR push schema (for quick setup)
-   npx prisma db push
+   # Push schema and seed data
+   supabase db push --include-all
    ```
 
 5. **Start the development server**
@@ -65,7 +65,9 @@ LOYALINK is a shared rewards platform that enables small businesses to offer loy
 ```
 loyalink/
 ├── prisma/
-│   └── schema.prisma          # Database schema
+│   └── schema.prisma          # Database schema (for migrations)
+├── supabase/
+│   └── migrations/            # Supabase migrations
 ├── src/
 │   ├── app/
 │   │   ├── api/               # API routes
@@ -84,7 +86,7 @@ loyalink/
 │   │   ├── navbar.tsx         # Navigation component
 │   │   └── qr-display.tsx     # QR code display
 │   └── lib/
-│       ├── prisma.ts          # Prisma client
+│       ├── supabase.ts        # Supabase client
 │       ├── validations.ts     # Zod schemas
 │       ├── errors.ts          # Error handling
 │       ├── env.ts             # Environment validation
@@ -99,7 +101,9 @@ loyalink/
 See `.env.example` for all available configuration options.
 
 **Required:**
-- `DATABASE_URL`: PostgreSQL or SQLite connection string
+- `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Supabase anon key (client-side)
+- `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role key (server-side)
 
 **Optional:**
 - `NODE_ENV`: Environment mode (development/production)
@@ -109,17 +113,16 @@ See `.env.example` for all available configuration options.
 
 - **Framework**: Next.js 16 (App Router)
 - **Language**: TypeScript
-- **Database**: PostgreSQL (Prisma ORM)
+- **Database**: PostgreSQL (Supabase)
 - **Validation**: Zod
 - **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui
 - **Icons**: Lucide React
-- **State Management**: Zustand
 
 ## 🔒 Security Features
 
 - ✅ Input validation with Zod schemas
-- ✅ SQL injection protection via Prisma
+- ✅ SQL injection protection via Supabase
 - ✅ Security headers (HSTS, CSP, XSS protection)
 - ✅ Error handling with sanitized responses
 - ✅ Environment variable validation
@@ -155,24 +158,21 @@ See `.env.example` for all available configuration options.
    vercel login
    ```
 
-3. **Set up Vercel Postgres**
-   - Go to your Vercel project dashboard
-   - Navigate to Storage → Create Database → Postgres
-   - Connect the database to your project
-   - The `DATABASE_URL` will be automatically added
+3. **Set up Supabase**
+   - Create a free Supabase project at https://supabase.com
+   - Get your project URL and API keys from Settings → API
+   - Run `supabase db push` to deploy the schema
 
-4. **Deploy**
+4. **Configure environment variables in Vercel**
    ```bash
-   vercel --prod
+   vercel env add NEXT_PUBLIC_SUPABASE_URL
+   vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY
+   vercel env add SUPABASE_SERVICE_ROLE_KEY
    ```
 
-5. **Run migrations**
+5. **Deploy**
    ```bash
-   # Pull environment variables
-   vercel env pull .env.local
-   
-   # Push database schema
-   npx prisma db push
+   vercel --prod
    ```
 
 See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed deployment instructions.
@@ -191,11 +191,10 @@ npm run lint         # Run ESLint
 ### Database Commands
 
 ```bash
-npx prisma studio              # Open Prisma Studio (DB GUI)
-npx prisma migrate dev         # Create and apply migration
-npx prisma db push             # Push schema without migration
-npx prisma generate            # Generate Prisma Client
-npx prisma db seed             # Run seed script (if configured)
+supabase db push             # Push schema changes to Supabase
+supabase db reset            # Reset database and reapply migrations
+supabase db seed             # Run seed script
+supabase link                # Link to Supabase project
 ```
 
 ## 📝 API Documentation
