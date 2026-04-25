@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import Link from "next/link"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { QRDisplay } from "@/components/qr-display"
 import { formatCurrency } from "@/lib/utils"
 import { Plus, Wallet, Store, Users, ArrowRight, X } from "lucide-react"
 
@@ -44,8 +44,6 @@ export default function MerchantsPage() {
   const [merchants, setMerchants] = useState<Merchant[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
-  const [selectedMerchant, setSelectedMerchant] = useState<Merchant | null>(null)
-  const [walletAmount, setWalletAmount] = useState("")
   const [formData, setFormData] = useState({
     name: "",
     shopName: "",
@@ -86,25 +84,6 @@ export default function MerchantsPage() {
       }
     } catch (error) {
       console.error("Error creating merchant:", error)
-    }
-  }
-
-  const handleAddWallet = async () => {
-    if (!selectedMerchant || !walletAmount) return
-    try {
-      const res = await fetch(`/api/merchants/${selectedMerchant.id}/wallet`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: parseFloat(walletAmount), type: "ADD" })
-      })
-      if (res.ok) {
-        setWalletAmount("")
-        fetchMerchants()
-        const updated = await res.json()
-        setSelectedMerchant(updated)
-      }
-    } catch (error) {
-      console.error("Error adding wallet balance:", error)
     }
   }
 
@@ -198,72 +177,6 @@ export default function MerchantsPage() {
         </div>
       )}
 
-      {/* Merchant Detail Modal */}
-      {selectedMerchant && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <CardHeader>
-              <div className="flex justify-between items-center">
-                <div>
-                  <CardTitle>{selectedMerchant.shopName}</CardTitle>
-                  <CardDescription>{selectedMerchant.category} • {selectedMerchant.address}</CardDescription>
-                </div>
-                <Button variant="ghost" size="icon" onClick={() => setSelectedMerchant(null)}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Wallet Section */}
-              <div className="bg-gradient-to-r from-amber-500 to-amber-600 rounded-xl p-6 text-white">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wallet className="w-5 h-5" />
-                  <span className="font-medium">Wallet Balance</span>
-                </div>
-                <div className="text-3xl font-bold mb-4">
-                  {formatCurrency(selectedMerchant.walletBalance)}
-                </div>
-                <div className="flex gap-2">
-                  <Input
-                    type="number"
-                    value={walletAmount}
-                    onChange={(e) => setWalletAmount(e.target.value)}
-                    placeholder="Amount"
-                    className="bg-white/20 border-white/30 text-white placeholder:text-white/60"
-                  />
-                  <Button 
-                    variant="secondary" 
-                    onClick={handleAddWallet}
-                    className="bg-white text-amber-600 hover:bg-white/90"
-                  >
-                    Add Funds
-                  </Button>
-                </div>
-              </div>
-
-              {/* QR Code */}
-              <QRDisplay merchantId={selectedMerchant.id} shopName={selectedMerchant.shopName} />
-
-              {/* Stats */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-50 rounded-xl p-4">
-                  <div className="text-2xl font-bold text-gray-900">
-                    {selectedMerchant._count?.transactions || 0}
-                  </div>
-                  <div className="text-sm text-gray-500">Transactions</div>
-                </div>
-                <div className="bg-gray-50 rounded-xl p-4">
-                  <div className="text-2xl font-bold text-gray-900">
-                    {selectedMerchant._count?.redemptions || 0}
-                  </div>
-                  <div className="text-sm text-gray-500">Redemptions</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
       {/* Merchants List */}
       {merchants.length === 0 ? (
         <Card className="text-center py-12">
@@ -280,10 +193,9 @@ export default function MerchantsPage() {
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
           {merchants.map((merchant) => (
-            <Card 
-              key={merchant.id} 
-              className="cursor-pointer hover:shadow-lg transition-shadow"
-              onClick={() => setSelectedMerchant(merchant)}
+            <Link key={merchant.id} href={`/merchants/${merchant.id}`}>
+            <Card
+              className="cursor-pointer hover:shadow-lg transition-shadow h-full"
             >
               <CardHeader>
                 <div className="flex justify-between items-start">
@@ -319,6 +231,7 @@ export default function MerchantsPage() {
                 </div>
               </CardContent>
             </Card>
+            </Link>
           ))}
         </div>
       )}
