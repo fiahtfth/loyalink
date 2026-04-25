@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
       .from("Customer")
       .select("*")
       .eq("phone", customerPhone)
-      .single()
+      .maybeSingle()
 
     if (!customer) {
       const { data: newCustomer, error: createErr } = await supabase
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       .from("CategoryEarnRate")
       .select("*")
       .eq("category", merchant.category)
-      .single()
+      .maybeSingle()
 
     const earnRate = categoryEarnRate?.earnRate || 1.0
     const pointsEarned = Math.floor((amount / 100) * earnRate)

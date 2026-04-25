@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
+import { merchantUpdateSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody } from "@/lib/errors"
 
 export async function GET(
   request: NextRequest,
@@ -50,10 +52,11 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
+    const validatedData = validateRequestBody(merchantUpdateSchema, body)
 
     const { data: merchant, error } = await supabase
       .from("Merchant")
-      .update(body)
+      .update(validatedData)
       .eq("id", id)
       .select()
       .single()
@@ -62,7 +65,6 @@ export async function PATCH(
 
     return NextResponse.json(merchant)
   } catch (error) {
-    console.error("Error updating merchant:", error)
-    return NextResponse.json({ error: "Failed to update merchant" }, { status: 500 })
+    return handleApiError(error)
   }
 }

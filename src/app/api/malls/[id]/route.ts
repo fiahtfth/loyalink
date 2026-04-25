@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { supabase } from "@/lib/supabase"
-import { handleApiError, AppError } from "@/lib/errors"
+import { mallUpdateSchema } from "@/lib/validations"
+import { handleApiError, validateRequestBody, AppError } from "@/lib/errors"
 
 export async function GET(
   request: NextRequest,
@@ -36,10 +37,11 @@ export async function PATCH(
   try {
     const { id } = await params
     const body = await request.json()
+    const validatedData = validateRequestBody(mallUpdateSchema, body)
 
     const { data: mall, error } = await supabase
       .from("Mall")
-      .update(body)
+      .update(validatedData)
       .eq("id", id)
       .select()
       .single()

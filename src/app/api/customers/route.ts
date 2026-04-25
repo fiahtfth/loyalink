@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
       .from("Customer")
       .select("*")
       .eq("phone", validatedData.phone)
-      .single()
+      .maybeSingle()
 
     if (existing) {
       return NextResponse.json(existing, { status: 200 })

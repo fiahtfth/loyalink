@@ -48,6 +48,27 @@ export const categoryEarnRateSchema = z.object({
   earnRate: z.number().min(0.1).max(10),
 });
 
+// Partial update schemas — restrict which fields can be modified via PATCH
+// to prevent tampering with sensitive fields like walletBalance.
+export const merchantUpdateSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  shopName: z.string().min(2).max(200).optional(),
+  phone: z.string().regex(phoneRegex).optional(),
+  category: z.string().min(2).max(100).optional(),
+  address: z.string().min(5).max(500).optional(),
+  mallId: z.string().min(1).nullable().optional(),
+  isActive: z.boolean().optional(),
+  settlementRate: z.number().min(0.8).max(0.9).optional(),
+}).strict();
+
+export const mallUpdateSchema = z.object({
+  name: z.string().min(2).max(200).optional(),
+  location: z.string().min(5).max(500).optional(),
+  bonusRate: z.number().min(0).max(0.2).optional(),
+  bonusEnabled: z.boolean().optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
 export type CustomerInput = z.infer<typeof customerSchema>;
 export type MerchantInput = z.infer<typeof merchantSchema>;
 export type MallInput = z.infer<typeof mallSchema>;
@@ -55,3 +76,5 @@ export type EarnTransactionInput = z.infer<typeof earnTransactionSchema>;
 export type RedeemTransactionInput = z.infer<typeof redeemTransactionSchema>;
 export type WalletUpdateInput = z.infer<typeof walletUpdateSchema>;
 export type CategoryEarnRateInput = z.infer<typeof categoryEarnRateSchema>;
+export type MerchantUpdateInput = z.infer<typeof merchantUpdateSchema>;
+export type MallUpdateInput = z.infer<typeof mallUpdateSchema>;

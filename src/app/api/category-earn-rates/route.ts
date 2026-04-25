@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
       .from("CategoryEarnRate")
       .select("*")
       .eq("category", validatedData.category)
-      .single()
+      .maybeSingle()
 
     let rate
     if (existing) {
